@@ -2,116 +2,82 @@ import React, { useState, useEffect } from 'react';
 
 // PUBLIC_INTERFACE
 /**
- * Main container for the GitHubActivityDashboard. Handles OAuth login, fetches repositories and events,
- * and displays repository list, activity feed, and user profile.
+ * Main container for the GitHubActivityDashboard.
+ * Uses unauthenticated/public GitHub API endpoints. No login/logout functionality.
+ * Assumes a default public username for demonstration.
+ * Provides repository list, activity feed, and profile as a public dashboard for any GitHub user.
  * @returns {JSX.Element} Main Dashboard Container
  */
 function GitHubActivityDashboard() {
-  // GitHub OAuth App credentials -- replace with your own client ID if needed.
-  const CLIENT_ID = "Iv1.8b6fc5cd1b8fa3d7"; // Demo/sample only, not production safe
-  const REDIRECT_URI = window.location.origin + "/";
-  const SCOPE = "repo user";
-  const AUTH_URL = `https://github.com/login/oauth/authorize?client_id=${CLIENT_ID}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&scope=${encodeURIComponent(SCOPE)}`;
+  // For demo: public GitHub handle (replace or allow input for custom user if desired)
+  const DEFAULT_USERNAME = "octocat";
 
   // State
-  const [accessToken, setAccessToken] = useState(null);
+  const [username, setUsername] = useState(DEFAULT_USERNAME);
   const [user, setUser] = useState(null);
   const [repos, setRepos] = useState([]);
   const [selectedRepo, setSelectedRepo] = useState(null);
   const [events, setEvents] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [inputUser, setInputUser] = useState(DEFAULT_USERNAME);
 
-  // --- OAuth: Handle redirect and get access token ---
+  // --- Fetch user info ---
   useEffect(() => {
-    // Extract ?code= from URL (after GitHub redirects user post-login)
-    const url = new URL(window.location.href);
-    const code = url.searchParams.get('code');
-    if (code && !accessToken) {
-      setLoading(true);
-      // You'd normally send 'code' to backend to exchange for an access_token.
-      // For demo: use an open API proxy (do NOT use in production).
-      fetch(`https://github-oauth-proxy.vercel.app/api/authenticate/${code}`)
-        .then(res => res.json())
-        .then(data => {
-          if (data && data.token) {
-            setAccessToken(data.token);
-            window.history.replaceState({}, document.title, "/"); // Clean URL
-          } else {
-            setError("OAuth failed. Please try again.");
-          }
-        })
-        .catch(() => setError("OAuth exchange failed."))
-        .finally(() => setLoading(false));
-    }
-  }, [accessToken]);
-
-  // --- Fetch user info once logged in ---
-  useEffect(() => {
-    if (!accessToken) return;
+    if (!username) return;
     setLoading(true);
-    fetch("https://api.github.com/user", {
-      headers: { Authorization: `token ${accessToken}` }
-    })
-      .then(res => res.json())
+    setError(null);
+    fetch(`https://api.github.com/users/${username}`)
+      .then(res => {
+        if (!res.ok) throw new Error("User not found");
+        return res.json();
+      })
       .then(data => {
         setUser(data);
       })
       .catch(() => setError("Failed to fetch user profile."))
       .finally(() => setLoading(false));
-  }, [accessToken]);
+  }, [username]);
 
   // --- Fetch repositories ---
   useEffect(() => {
-    if (!accessToken) return;
+    if (!username) return;
     setLoading(true);
-    fetch("https://api.github.com/user/repos?per_page=100", {
-      headers: { Authorization: `token ${accessToken}` }
-    })
-      .then(res => res.json())
+    setError(null);
+    fetch(`https://api.github.com/users/${username}/repos?per_page=100`)
+      .then(res => {
+        if (!res.ok) {
+          throw new Error("Repo fetch failed");
+        }
+        return res.json();
+      })
       .then(data => {
         setRepos(Array.isArray(data) ? data : []);
+        setSelectedRepo(null);
       })
       .catch(() => setError("Failed to fetch repositories."))
       .finally(() => setLoading(false));
-  }, [accessToken]);
+  }, [username]);
 
   // --- Fetch repo activity feed ---
   useEffect(() => {
-    if (!accessToken || !selectedRepo) {
+    if (!selectedRepo) {
       setEvents([]);
       return;
     }
     setLoading(true);
-    fetch(`https://api.github.com/repos/${selectedRepo.full_name}/events?per_page=30`, {
-      headers: { Authorization: `token ${accessToken}` }
-    })
-      .then(res => res.json())
+    setError(null);
+    fetch(`https://api.github.com/repos/${selectedRepo.full_name}/events?per_page=30`)
+      .then(res => {
+        if (!res.ok) throw new Error("Events fetch failed");
+        return res.json();
+      })
       .then(data => {
         setEvents(Array.isArray(data) ? data : []);
       })
       .catch(() => setError("Failed to fetch activity feed."))
       .finally(() => setLoading(false));
-  }, [accessToken, selectedRepo]);
-
-  // --- UI Components ---
-
-  // PUBLIC_INTERFACE
-  /** Start OAuth login */
-  function handleLogin() {
-    window.location.href = AUTH_URL;
-  }
-
-  // PUBLIC_INTERFACE
-  /** Logout implementation (clears all local state) */
-  function handleLogout() {
-    setAccessToken(null);
-    setUser(null);
-    setRepos([]);
-    setSelectedRepo(null);
-    setEvents([]);
-    window.location.href = "/";
-  }
+  }, [selectedRepo]);
 
   // PUBLIC_INTERFACE
   /** Repo sidebar list */
@@ -223,18 +189,18 @@ function GitHubActivityDashboard() {
       }}>No activity for this repository.</div>;
     }
 
-    // Activity formatter (simple for demo)
+    // Activity formatter
     function formatEvent(e) {
       let desc = "";
       switch (e.type) {
         case "PushEvent":
-          desc = `pushed to branch ${e.payload.ref.replace('refs/heads/', '')}`;
+          desc = `pushed to branch ${e.payload.ref?.replace('refs/heads/', '')}`;
           break;
         case "IssuesEvent":
-          desc = `${e.payload.action} issue #${e.payload.issue.number}`;
+          desc = `${e.payload.action} issue #${e.payload.issue?.number}`;
           break;
         case "PullRequestEvent":
-          desc = `${e.payload.action} pull request #${e.payload.pull_request.number}`;
+          desc = `${e.payload.action} pull request #${e.payload.pull_request?.number}`;
           break;
         default:
           desc = e.type.replace(/([A-Z])/g, ' $1').trim();
@@ -269,68 +235,56 @@ function GitHubActivityDashboard() {
     );
   }
 
-  // Main Render
-  if (!accessToken) {
+  // PUBLIC_INTERFACE
+  /** User search bar to enter a GitHub handle */
+  function UserSearch({ onSubmit, value, onChange, loading }) {
     return (
-      <div style={{
-        minHeight: "100vh",
-        background: "#f1f8ff",
-        display: "flex",
-        flexDirection: "column",
-      }}>
-        <nav style={{
-          background: "#24292e",
-          color: "#fff",
-          padding: "17px 0",
-          fontWeight: 600,
-          fontSize: "1.13rem",
-          boxShadow: "0 1px 2px rgba(36,41,46,0.07)"
-        }}>
-          <div className="container" style={{ maxWidth: 880, margin: "0 auto", padding: "0 30px" }}>
-            <span style={{ color: "#f1f8ff" }}>GitHub Activity Dashboard</span>
-          </div>
-        </nav>
-
-        <main style={{
-          flex: "1 1 auto",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-        }}>
-          <div style={{
+      <form
+        style={{ display: "flex", gap: 12, marginBottom: 20 }}
+        onSubmit={e => {
+          e.preventDefault();
+          onSubmit(value);
+        }}
+        autoComplete="off"
+      >
+        <input
+          style={{
+            padding: "9px 17px",
+            fontSize: "1.06rem",
+            borderRadius: 6,
+            border: "1px solid #e1e4e8",
+            outline: "none",
+            width: 220,
             background: "#fff",
-            borderRadius: 12,
-            padding: "48px 40px",
-            boxShadow: "0 2px 12px #e1e4e880",
-            minWidth: 320,
-          }}>
-            <h2 style={{ marginTop: 0, color: "#24292e" }}>Welcome</h2>
-            <p style={{ color: "#586069" }}>Sign in with GitHub to view your repositories and recent activity.</p>
-            <button
-              className="btn btn-large"
-              style={{
-                background: "#24292e",
-                color: "#f1f8ff",
-                border: "none",
-                borderRadius: 5,
-                fontSize: "1.1rem",
-                padding: "14px 22px",
-                marginTop: 15,
-                cursor: "pointer"
-              }}
-              onClick={handleLogin}
-              disabled={loading}
-            >
-              {loading ? "Connecting..." : "Login with GitHub"}
-            </button>
-            {error && <div style={{ color: "red", marginTop: 14 }}>{error}</div>}
-          </div>
-        </main>
-      </div>
+            color: "#222"
+          }}
+          type="text"
+          value={value}
+          onChange={e => onChange(e.target.value)}
+          disabled={loading}
+          placeholder="Enter GitHub username"
+        />
+        <button
+          className="btn"
+          style={{
+            background: "#0366d6",
+            color: "#fff",
+            fontWeight: 600,
+            border: "none",
+            borderRadius: 6,
+            padding: "9px 24px"
+          }}
+          disabled={loading || !value}
+          type="submit"
+        >
+          View User
+        </button>
+      </form>
     );
   }
 
-  // Authenticated dashboard layout
+
+  // Main Render: Always open, no login required
   return (
     <div style={{
       minHeight: "100vh",
@@ -347,27 +301,8 @@ function GitHubActivityDashboard() {
         fontSize: "1.13rem",
         boxShadow: "0 1px 2px rgba(36,41,46,0.07)"
       }}>
-        <div style={{
-          maxWidth: 880,
-          margin: "0 auto",
-          padding: "0 30px",
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center"
-        }}>
+        <div className="container" style={{ maxWidth: 880, margin: "0 auto", padding: "0 30px", display: "flex", alignItems: "center" }}>
           <span style={{ color: "#f1f8ff" }}>GitHub Activity Dashboard</span>
-          <button
-            style={{
-              color: "#fff",
-              background: "#0366d6",
-              border: "none",
-              borderRadius: 4,
-              padding: "8px 18px",
-              fontWeight: 600,
-              cursor: "pointer",
-            }}
-            onClick={handleLogout}
-          >Logout</button>
         </div>
       </nav>
 
@@ -390,6 +325,17 @@ function GitHubActivityDashboard() {
           maxWidth: 800,
           margin: "0 auto"
         }}>
+          {/* User search bar */}
+          <UserSearch
+            onSubmit={(v) => {
+              if (v !== username) setUsername(v.trim());
+            }}
+            value={inputUser}
+            onChange={setInputUser}
+            loading={loading}
+          />
+
+          {/* User profile */}
           <UserProfile user={user} />
 
           <div>
